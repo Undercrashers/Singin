@@ -251,6 +251,22 @@ const RESTAURANT_DATA = [
   },
 ]
 
+const INITIAL_BOOKING_FORM = {
+  date: '',
+  time: '',
+  guests: '',
+  name: '',
+  email: '',
+}
+
+function loadBookmarkHintVisible() {
+  try {
+    return localStorage.getItem('singin_bookmark_hint_dismissed') !== 'true'
+  } catch {
+    return true
+  }
+}
+
 function loadBookmarks() {
   try {
     const saved = localStorage.getItem('singin_bookmarks')
@@ -269,6 +285,13 @@ export default function App() {
   const [isBookingOpen, setIsBookingOpen] = useState(false)
   const [bookingSuccess, setBookingSuccess] = useState(false)
   const [showAllRestaurants, setShowAllRestaurants] = useState(false)
+  const [navOnHero, setNavOnHero] = useState(true)
+  const [showBookmarkHint, setShowBookmarkHint] = useState(false)
+  const [isBookmarkMenuOpen, setIsBookmarkMenuOpen] = useState(false)
+  const [bookingForm, setBookingForm] = useState(INITIAL_BOOKING_FORM)
+  const [bookingLoading, setBookingLoading] = useState(false)
+  const [bookingError, setBookingError] = useState('')
+  const [bookingDevMode, setBookingDevMode] = useState(false)
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -294,6 +317,25 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (loading) return undefined
+
+    const onScroll = () => {
+      setNavOnHero(window.scrollY < window.innerHeight * 0.75)
+    }
+
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [loading])
+
+  useEffect(() => {
+    if (loading || !loadBookmarkHintVisible()) return undefined
+
+    const timer = setTimeout(() => setShowBookmarkHint(true), 3500)
+    return () => clearTimeout(timer)
+  }, [loading])
+
+  useEffect(() => {
     localStorage.setItem('singin_bookmarks', JSON.stringify(bookmarks))
   }, [bookmarks])
 
@@ -305,6 +347,31 @@ export default function App() {
     }
   }, [activeRestaurant, isSidebarOpen, loading, isBookingOpen])
 
+  useEffect(() => {
+    if (!isBookmarkMenuOpen) return undefined
+
+    const closeMenu = () => setIsBookmarkMenuOpen(false)
+    window.addEventListener('click', closeMenu)
+    return () => window.removeEventListener('click', closeMenu)
+  }, [isBookmarkMenuOpen])
+
+  const dismissBookmarkHint = () => {
+    localStorage.setItem('singin_bookmark_hint_dismissed', 'true')
+    setShowBookmarkHint(false)
+  }
+
+  const openBooking = () => {
+    setBookingError('')
+    setBookingSuccess(false)
+    setBookingDevMode(false)
+    setBookingForm(INITIAL_BOOKING_FORM)
+    setIsBookingOpen(true)
+  }
+
+  const updateBookingField = (field, value) => {
+    setBookingForm((prev) => ({ ...prev, [field]: value }))
+  }
+
   const toggleBookmark = (id, e) => {
     if (e) e.stopPropagation()
     setBookmarks((prev) =>
@@ -312,13 +379,47 @@ export default function App() {
     )
   }
 
-  const handleBookingSubmit = (e) => {
+  const handleBookingSubmit = async (e) => {
     e.preventDefault()
-    setBookingSuccess(true)
-    setTimeout(() => {
-      setBookingSuccess(false)
-      setIsBookingOpen(false)
-    }, 4000)
+    setBookingLoading(true)
+    setBookingError('')
+
+    try {
+      const response = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...bookingForm,
+          restaurantName: activeRestaurant?.name ?? 'Singin',
+        }),
+      })
+
+      let data
+      try {
+        data = await response.json()
+      } catch {
+        throw new Error(
+          'Booking server is offline. Stop the app and run: bun run dev (this starts both the site and email API).',
+        )
+      }
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message ?? 'Booking failed. Please try again.')
+      }
+
+      setBookingDevMode(Boolean(data.dev))
+      setBookingSuccess(true)
+      setTimeout(() => {
+        setBookingSuccess(false)
+        setBookingDevMode(false)
+        setIsBookingOpen(false)
+        setBookingForm(INITIAL_BOOKING_FORM)
+      }, 5000)
+    } catch (err) {
+      setBookingError(err instanceof Error ? err.message : 'Booking failed. Please try again.')
+    } finally {
+      setBookingLoading(false)
+    }
   }
 
   const exploreRestaurants = showAllRestaurants
@@ -344,6 +445,144 @@ export default function App() {
           </p>
         </div>
       </div>
+
+      {/* Floating navbar */}
+      {!loading && (
+        <nav
+          className={`fixed top-4 md:top-6 left-1/2 -translate-x-1/2 z-[90] w-[calc(100%-1.5rem)] max-w-5xl transition-all duration-500 ${
+            navOnHero
+              ? 'bg-black/35 border-white/20 text-white backdrop-blur-md'
+              : 'bg-[#F9F8F4]/90 border-[#1A1A1A]/10 text-[#1A1A1A] backdrop-blur-md shadow-lg'
+          } border rounded-full px-4 md:px-6 py-3 md:py-4`}
+        >
+          <div className="flex items-center justify-end relative min-h-[40px]">
+            <a
+              href="#hero"
+              className="absolute left-1/2 -translate-x-1/2 text-lg md:text-2xl tracking-[0.25em] uppercase font-serif"
+            >
+              Singin
+            </a>
+
+            <div className="flex items-center gap-2 md:gap-3 relative">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    dismissBookmarkHint()
+                    setIsBookmarkMenuOpen((open) => !open)
+                  }}
+                  className={`relative p-2.5 rounded-full transition-colors ${
+                    navOnHero ? 'hover:bg-white/15' : 'hover:bg-[#1A1A1A]/5'
+                  } ${isBookmarkMenuOpen ? (navOnHero ? 'bg-white/15' : 'bg-[#1A1A1A]/5') : ''}`}
+                  aria-label="View saved bookmarks"
+                  aria-expanded={isBookmarkMenuOpen}
+                >
+                  <Bookmark
+                    size={18}
+                    strokeWidth={1.5}
+                    fill={bookmarks.length > 0 ? 'currentColor' : 'none'}
+                  />
+                  {bookmarks.length > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#B06D5B] text-white text-[10px] font-bold flex items-center justify-center border-2 border-current">
+                      {bookmarks.length}
+                    </span>
+                  )}
+                </button>
+
+                {showBookmarkHint && (
+                  <div className="absolute top-full right-0 mt-3 w-56 bg-[#1A1A1A] text-white rounded-lg shadow-xl p-4 text-left animate-fade-in border border-white/10">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#B06D5B] mb-2">
+                      Tip
+                    </p>
+                    <p className="text-xs font-hero leading-relaxed text-white/80 mb-3">
+                      Check your saved places anytime from the bookmark icon in the navbar.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        dismissBookmarkHint()
+                      }}
+                      className="text-[10px] uppercase tracking-widest text-white/60 hover:text-white"
+                    >
+                      Got it
+                    </button>
+                    <div className="absolute -top-2 right-6 w-3 h-3 bg-[#1A1A1A] rotate-45 border-l border-t border-white/10" />
+                  </div>
+                )}
+
+                {isBookmarkMenuOpen && (
+                  <div
+                    className="absolute top-full right-0 mt-3 w-72 bg-[#F9F8F4] text-[#1A1A1A] rounded-lg shadow-2xl border border-[#1A1A1A]/10 overflow-hidden animate-fade-in"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-4 py-3 border-b border-[#1A1A1A]/10 flex items-center justify-between">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#B06D5B]">
+                        Saved Places
+                      </p>
+                      <span className="text-xs font-hero text-[#8A9A86]">{bookmarks.length}</span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                      {bookmarks.length === 0 ? (
+                        <p className="p-4 text-xs font-hero text-[#1A1A1A]/50 italic">
+                          No bookmarks yet. Save a restaurant while exploring.
+                        </p>
+                      ) : (
+                        <ul>
+                          {bookmarks.map((bId) => {
+                            const rest = RESTAURANT_DATA.find((r) => r.id === bId)
+                            if (!rest) return null
+                            return (
+                              <li key={bId}>
+                                <button
+                                  type="button"
+                                  className="w-full text-left px-4 py-3 hover:bg-[#EFECE5] transition-colors border-b border-[#1A1A1A]/5 last:border-b-0"
+                                  onClick={() => {
+                                    setActiveRestaurant(rest)
+                                    setIsBookmarkMenuOpen(false)
+                                  }}
+                                >
+                                  <p className="text-sm font-serif uppercase">{rest.name}</p>
+                                  <p className="text-[10px] font-hero text-[#8A9A86] uppercase tracking-widest mt-1">
+                                    {rest.type}
+                                  </p>
+                                </button>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsBookmarkMenuOpen(false)
+                        setIsSidebarOpen(true)
+                      }}
+                      className="w-full px-4 py-3 text-[10px] font-bold uppercase tracking-[0.2em] hover:bg-[#1A1A1A] hover:text-white transition-colors border-t border-[#1A1A1A]/10"
+                    >
+                      Open Full Menu
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSidebarOpen(true)}
+                className={`flex flex-col gap-1.5 w-8 p-2 rounded-full transition-colors ${
+                  navOnHero ? 'hover:bg-white/15' : 'hover:bg-[#1A1A1A]/5'
+                }`}
+                aria-label="Open menu"
+              >
+                <div className={`w-full h-px ${navOnHero ? 'bg-white' : 'bg-[#1A1A1A]'}`} />
+                <div className={`w-full h-px ${navOnHero ? 'bg-white' : 'bg-[#1A1A1A]'}`} />
+              </button>
+            </div>
+          </div>
+        </nav>
+      )}
 
       {/* Sidebar */}
       <div className="fixed inset-0 z-[70] pointer-events-none">
@@ -525,7 +764,7 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() => setIsBookingOpen(true)}
+                onClick={openBooking}
                 className="w-full bg-[#1A1A1A] text-white text-xs font-bold uppercase tracking-[0.2em] py-5 hover:bg-[#B06D5B] transition-colors duration-500"
               >
                 Book a Table
@@ -577,17 +816,22 @@ export default function App() {
                 <input
                   required
                   type="date"
+                  value={bookingForm.date}
+                  onChange={(e) => updateBookingField('date', e.target.value)}
                   className="w-full bg-transparent border-b border-[#1A1A1A]/20 py-3 text-sm font-hero focus:outline-none focus:border-[#1A1A1A] transition-colors"
                 />
                 <input
                   required
                   type="time"
+                  value={bookingForm.time}
+                  onChange={(e) => updateBookingField('time', e.target.value)}
                   className="w-full bg-transparent border-b border-[#1A1A1A]/20 py-3 text-sm font-hero focus:outline-none focus:border-[#1A1A1A] transition-colors"
                 />
               </div>
               <select
                 required
-                defaultValue=""
+                value={bookingForm.guests}
+                onChange={(e) => updateBookingField('guests', e.target.value)}
                 className="w-full bg-transparent border-b border-[#1A1A1A]/20 py-3 text-sm font-hero text-[#1A1A1A]/80 focus:outline-none focus:border-[#1A1A1A] transition-colors appearance-none cursor-pointer"
               >
                 <option value="" disabled>
@@ -603,19 +847,29 @@ export default function App() {
                 required
                 type="text"
                 placeholder="Full Name"
+                value={bookingForm.name}
+                onChange={(e) => updateBookingField('name', e.target.value)}
                 className="w-full bg-transparent border-b border-[#1A1A1A]/20 py-3 text-sm font-hero placeholder-[#1A1A1A]/40 focus:outline-none focus:border-[#1A1A1A] transition-colors"
               />
               <input
                 required
                 type="email"
                 placeholder="Email Address"
+                value={bookingForm.email}
+                onChange={(e) => updateBookingField('email', e.target.value)}
                 className="w-full bg-transparent border-b border-[#1A1A1A]/20 py-3 text-sm font-hero placeholder-[#1A1A1A]/40 focus:outline-none focus:border-[#1A1A1A] transition-colors"
               />
+              {bookingError && (
+                <p className="text-sm font-hero text-red-700" role="alert">
+                  {bookingError}
+                </p>
+              )}
               <button
                 type="submit"
-                className="bg-[#1A1A1A] text-white text-xs font-bold uppercase tracking-[0.2em] py-5 hover:bg-[#B06D5B] transition-colors duration-500 mt-4 w-full"
+                disabled={bookingLoading}
+                className="bg-[#1A1A1A] text-white text-xs font-bold uppercase tracking-[0.2em] py-5 hover:bg-[#B06D5B] transition-colors duration-500 mt-4 w-full disabled:opacity-60"
               >
-                Confirm Reservation
+                {bookingLoading ? 'Sending...' : 'Confirm Reservation'}
               </button>
             </form>
           </div>
@@ -625,11 +879,22 @@ export default function App() {
           >
             <CheckCircle size={64} className="text-[#8A9A86] mb-6 animate-fade-in" strokeWidth={1} />
             <h3 className="text-3xl font-serif uppercase leading-tight mb-4 animate-fade-in">
-              Request Received
+              {bookingDevMode ? 'Booking Saved' : 'Reservation Finalized'}
             </h3>
             <p className="text-sm font-medium text-[#1A1A1A]/60 leading-relaxed font-hero animate-fade-in">
-              Thank you. You will get your confirmation in your email shortly. We look forward to
-              hosting you.
+              {bookingDevMode ? (
+                <>
+                  Your booking was recorded, but no email was sent yet. Add SMTP settings in a{' '}
+                  <code className="text-xs">.env</code> file and restart with{' '}
+                  <code className="text-xs">bun run dev</code> to receive confirmations at{' '}
+                  {bookingForm.email}.
+                </>
+              ) : (
+                <>
+                  A confirmation email has been sent to {bookingForm.email}. We look forward to
+                  hosting you.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -647,29 +912,7 @@ export default function App() {
           />
           <div className="absolute inset-0 z-10 bg-black/40" />
 
-          <header className="absolute top-0 left-0 w-full px-6 md:px-12 py-8 flex justify-between items-center z-20 text-white">
-            <button
-              type="button"
-              onClick={() => setIsBookingOpen(true)}
-              className="text-[10px] md:text-xs tracking-[0.2em] uppercase border border-white/40 px-6 py-3 hover:bg-white hover:text-black transition-colors duration-500 font-hero"
-            >
-              Book Now
-            </button>
-            <div className="text-2xl md:text-4xl tracking-[0.3em] uppercase font-serif text-white">
-              Singin
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsSidebarOpen(true)}
-              className="flex flex-col gap-2 w-8 group p-2"
-              aria-label="Open menu"
-            >
-              <div className="w-full h-px bg-white group-hover:bg-[#B06D5B] transition-colors" />
-              <div className="w-full h-px bg-white group-hover:bg-[#B06D5B] transition-colors" />
-            </button>
-          </header>
-
-          <div className="relative z-20 text-center text-white px-4 flex flex-col items-center mt-12 w-full max-w-5xl mx-auto">
+          <div className="relative z-20 text-center text-white px-4 flex flex-col items-center pt-28 md:pt-32 w-full max-w-5xl mx-auto">
             <span className="text-[10px] md:text-xs tracking-[0.3em] uppercase mb-8 md:mb-12 font-medium font-hero text-white/80 reveal-up">
               Gallery
             </span>
